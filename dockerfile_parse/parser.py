@@ -262,8 +262,11 @@ class DockerfileParser(object):
         lineno = -1
         line_continuation_char = '\\'
         insnre = re.compile(r'^\s*(\S+)\s+(.*)$')  # matched group is insn
-        contre = re.compile(r'^.*\\\s*$')          # line continues?
-        commentre = re.compile(r'^\s*#')           # line is a comment?
+        contre = re.compile(r'^.*\\\s*$')  # line continues?
+        commentre = re.compile(r'^\s*#')  # line is a comment?
+        # line begins a heredoc (captures delimiter)
+        heredocre = re.compile(r'''<<[-~]?\s*(?:['"])?([\w]+(?:\s+[\w]+)*)(?:['"])?''')
+
         directive_possible = True
         # escape directive regex
         escape_directive_re = re.compile(r'^\s*#\s*escape\s*=\s*(\\|`)\s*$', re.I)
@@ -271,6 +274,8 @@ class DockerfileParser(object):
         syntax_directive_re = re.compile(r'^\s*#\s*syntax\s*=\s*(.*)\s*$', re.I)
 
         in_continuation = False
+        in_heredoc = False
+        heredoc_delimre = None
         current_instruction = {}
 
         for line in self.lines:
@@ -295,19 +300,19 @@ class DockerfileParser(object):
             # as a multi-line instruction can be interjected with comments.
             if commentre.match(line):
                 comment = _create_instruction_dict(
-                    instruction=COMMENT_INSTRUCTION,
-                    value=_clean_comment_line(line)
+                    instruction=COMMENT_INSTRUCTION, value=_clean_comment_line(line)
                 )
                 instructions.append(comment)
 
             else:
-                if not in_continuation:
+                if not (in_continuation or in_heredoc):
                     m = insnre.match(line)
                     if not m:
                         continue
+
                     current_instruction = _create_instruction_dict(
                         instruction=m.groups()[0].upper(),
-                        value=_rstrip_eol(m.groups()[1], line_continuation_char)
+                        value=_rstrip_eol(m.groups()[1], line_continuation_char),
                     )
                 else:
                     current_instruction['content'] += line
@@ -316,11 +321,28 @@ class DockerfileParser(object):
                     if current_instruction['value']:
                         current_instruction['value'] += _rstrip_eol(line, line_continuation_char)
                     else:
-                        current_instruction['value'] = _rstrip_eol(line.lstrip(),
-                                                                   line_continuation_char)
+                        current_instruction['value'] = _rstrip_eol(
+                            line.lstrip(), line_continuation_char
+                        )
+
+                    if in_heredoc:
+                        current_instruction['value'] += '\n'
+                        if heredoc_delimre.match(line.lstrip()):
+                            in_heredoc = False
+                            heredoc_delimre = None
 
                 in_continuation = contre.match(line)
-                if not in_continuation and current_instruction:
+                
+                if not in_heredoc:
+                    begin_heredoc = heredocre.search(line)
+                    if begin_heredoc:
+                        in_heredoc = True
+                        heredoc_delimre = re.compile(f'{begin_heredoc.groups()[0]}')
+                        if current_instruction:
+                            current_instruction['value'] += '\n'
+                
+                
+                if not (in_continuation or in_heredoc) and current_instruction:
                     instructions.append(current_instruction)
 
         return instructions
