@@ -15,6 +15,7 @@ import pytest
 import re
 import sys
 from textwrap import dedent
+from itertools import product
 
 from dockerfile_parse import DockerfileParser
 from dockerfile_parse.parser import image_from
@@ -1509,3 +1510,30 @@ class TestDockerfileParser(object):
                 'value': 'touch foo;     touch bar'
             }
         ]
+
+    @pytest.mark.parametrize(
+        "prefix, modifier, delim, suffix", 
+        product(
+            ["", "command "], 
+            ["-", "~", " ", ""], 
+            ["EOF", '"EO F"', "'EO F'"],
+            ["", " > 'output'"],
+        )
+    )
+    def test_heredoc_parsing(self, prefix, modifier, delim, suffix):
+        '''Tests parsing of multiline heredocs.'''
+        dfparser = DockerfileParser()
+        identifier = delim.strip('"').strip("'")
+        prelude = "\n".join(["FROM image", "RUN "])
+        heredoc = "\n".join(
+            [
+                f"{prefix}<<{modifier}{delim}{suffix}",
+                "command0 arg0 arg1 arg2",
+                "command1 arg0 arg1 arg2 arg3",
+                identifier,
+            ]
+        )
+        dockerfile_content = prelude + heredoc
+        dfparser.content = dockerfile_content
+        assert len(dfparser.structure) == 2
+        assert dfparser.structure[1]["value"] == heredoc
