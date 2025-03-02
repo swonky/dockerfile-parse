@@ -325,21 +325,23 @@ class DockerfileParser(object):
                             line.lstrip(), line_continuation_char
                         )
 
+                    # checks if this line closes "here document"
                     if in_heredoc:
-                        current_instruction['value'] += '\n'
                         if heredoc_delimre.match(line.lstrip()):
                             in_heredoc = False
                             heredoc_delimre = None
+                        else:
+                            current_instruction['value'] += '\n'
 
                 in_continuation = contre.match(line)
                 
+                # checks if this line opens a new "here document"
                 if not in_heredoc:
                     begin_heredoc = heredocre.search(line)
-                    if begin_heredoc:
+                    if begin_heredoc and current_instruction:
                         in_heredoc = True
                         heredoc_delimre = re.compile(f'{begin_heredoc.groups()[0]}')
-                        if current_instruction:
-                            current_instruction['value'] += '\n'
+                        current_instruction['value'] += '\n'
                 
                 
                 if not (in_continuation or in_heredoc) and current_instruction:
